@@ -136,7 +136,7 @@ _nss_sqlite_getgrent_r(struct group *gbuf, char *buf,
     gid = sqlite3_column_int(grent_data.pSt, 0);
     name = sqlite3_column_text(grent_data.pSt, 1);
     pw = sqlite3_column_text(grent_data.pSt, 2);
-    NSS_DEBUG("getgrent_r: fetched group #%d: %s\n", gid, name);
+    NSS_DEBUG("getgrent_r: fetched group %d: %s\n", gid, name);
 
     res = fill_group(grent_data.pDb, gbuf, buf, buflen, name, pw, gid, errnop);
     if(res == NSS_STATUS_TRYAGAIN && (*errnop) == ERANGE) {
@@ -179,7 +179,7 @@ _nss_sqlite_getgrnam_r(const char* name, struct group *gbuf,
     }
 
     if(sqlite3_bind_text(pSt, 1, name, -1, SQLITE_STATIC) != SQLITE_OK) {
-        NSS_ERROR(sqlite3_errmsg(pDb));
+        NSS_ERROR("SQL Error Message : %s\n", sqlite3_errmsg(pDb));
         sqlite3_finalize(pSt);
         sqlite3_close(pDb);
         return NSS_STATUS_UNAVAIL;
@@ -220,14 +220,14 @@ _nss_sqlite_getgrgid_r(gid_t gid, struct group *gbuf,
      const char* sql = "SELECT groupname, passwd FROM groups WHERE gid = ?";
 
 
-    NSS_DEBUG("getgrgid_r : looking for group #%d\n", gid);
+    NSS_DEBUG("getgrgid_r : looking for group %d\n", gid);
 
     if(!open_and_prepare(&pDb, &pSt, sql)) {
         return NSS_STATUS_UNAVAIL;
     }
 
     if(sqlite3_bind_int(pSt, 1, gid) != SQLITE_OK) {
-        NSS_ERROR(sqlite3_errmsg(pDb));
+        NSS_ERROR("SQL Error Message : %s\n", sqlite4_errmsg(pDb));
         sqlite3_finalize(pSt);
         sqlite3_close(pDb);
         return NSS_STATUS_UNAVAIL;
@@ -349,16 +349,16 @@ enum nss_status get_users(sqlite3* pDb, gid_t gid, char* buffer, size_t buflen, 
     char **members;
     char **ptr_area = (char**)buffer;
 
-    NSS_DEBUG("get_users: looking for members of group #%d\n", gid);
+    NSS_DEBUG("get_users: looking for members of group %d\n", gid);
     
     if(sqlite3_prepare(pDb, sql, strlen(sql), &pSt, NULL) != SQLITE_OK) {
-        NSS_ERROR(sqlite3_errmsg(pDb));
+        NSS_ERROR("SQL Error Message : %s\n", sqlite3_errmsg(pDb));
         sqlite3_finalize(pSt);
         return NSS_STATUS_UNAVAIL;
     }
 
     if(sqlite3_bind_int(pSt, 1, gid) != SQLITE_OK) {
-        NSS_ERROR(sqlite3_errmsg(pDb));
+        NSS_ERROR("SQL Error Message : %s\n", sqlite3_errmsg(pDb));
         sqlite3_finalize(pSt);
         return NSS_STATUS_UNAVAIL;
     }
