@@ -54,7 +54,7 @@ enum nss_status _nss_sqlite_getspnam_r(const char* name, struct spwd *spbuf,
     }
 
     if(sqlite3_bind_text(pSt, 1, name, -1, SQLITE_STATIC) != SQLITE_OK) {
-        NSS_DEBUG(sqlite3_errmsg(pDb));
+        //NSS_DEBUG(sqlite3_errmsg(pDb));
         sqlite3_finalize(pSt);
         sqlite3_close(pDb);
         return NSS_STATUS_UNAVAIL;

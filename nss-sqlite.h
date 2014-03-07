@@ -12,15 +12,16 @@
 #include <nss.h>
 #include <syslog.h>
 #include <stdio.h>
+#include <unistd.h>
 
 /* Some syslog shortcuts */
 #ifdef DEBUG
-#define NSS_DEBUG(msg, ...) syslog(LOG_DEBUG, (msg), ## __VA_ARGS__)
+#define NSS_DEBUG(msg, ...) syslog(LOG_DEBUG, ("[%s] [%s] [%d] -> " msg), __FILE__, __FUNCTION__, __LINE__, ## __VA_ARGS__)
 #else
 #define NSS_DEBUG(msg, ...)
 #endif
 
-#define NSS_ERROR(msg, ...) syslog(LOG_ERR, (msg), ## __VA_ARGS__)
+#define NSS_ERROR(msg, ...) syslog(LOG_ERR, ("[%s] [%s] [%d] -> " msg), __FILE__, __FUNCTION__, __LINE__, ## __VA_ARGS__)
 
 #define FALSE 0
 #define TRUE !FALSE

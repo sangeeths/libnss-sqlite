@@ -36,14 +36,17 @@
  */
 int
 _open_and_prepare(struct sqlite3** ppDb, struct sqlite3_stmt** ppSt, const char* sql, const char* file) {
+
+    NSS_DEBUG("Database: %s - SQL Query : %s", file, sql);
+
     if(sqlite3_open(file, ppDb) != SQLITE_OK) {
-        NSS_ERROR(sqlite3_errmsg(*ppDb));
+        NSS_ERROR("SQL Error Message : %s\n", sqlite3_errmsg(*ppDb));
         sqlite3_close(*ppDb);
         return FALSE;
     }
 
     if(sqlite3_prepare(*ppDb, sql, strlen(sql), ppSt, NULL) != SQLITE_OK) {
-        NSS_ERROR(sqlite3_errmsg(*ppDb));
+        NSS_ERROR("SQL Error Message : %s\n", sqlite3_errmsg(*ppDb));
         sqlite3_finalize(*ppSt);
         sqlite3_close(*ppDb);
         return FALSE;
@@ -180,19 +183,35 @@ enum nss_status fill_passwd(struct passwd* pwbuf, char* buf, size_t buflen,
         return NSS_STATUS_TRYAGAIN;
     }
 
+//     struct passwd {
+//         char *pw_name;      /* user's login name */
+//         char *pw_passwd;    /* no longer used */
+//         uid_t pw_uid;       /* user's uid */
+//         gid_t pw_gid;       /* user's gid */
+//         char *pw_age;       /* not used */
+//         char *pw_comment;   /* not used */
+//         char *pw_gecos;     /* typically user's full name */
+//         char *pw_dir;       /* user's home dir */
+//         char *pw_shell;     /* user's login shell */
+//     };
+
     pwbuf->pw_uid = uid;
     pwbuf->pw_gid = gid;
     strcpy(buf, name);
     pwbuf->pw_name = buf;
+
     buf += name_length;
     strcpy(buf, pw);
     pwbuf->pw_passwd = buf;
+
     buf += pw_length;
     strcpy(buf, gecos);
     pwbuf->pw_gecos = buf;
+
     buf += gecos_length;
     strcpy(buf, shell);
     pwbuf->pw_shell = buf;
+
     buf += shell_length;
     strcpy(buf, homedir);
     pwbuf->pw_dir = buf;

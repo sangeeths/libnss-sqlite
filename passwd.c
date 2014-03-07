@@ -81,7 +81,7 @@ enum nss_status _nss_sqlite_getpwnam_r(const char* name, struct passwd *pwbuf,
     }
 
     if(sqlite3_bind_text(pSt, 1, name, -1, SQLITE_STATIC) != SQLITE_OK) {
-        NSS_DEBUG(sqlite3_errmsg(pDb));
+        NSS_ERROR("SQL Error Message : %s\n", sqlite3_errmsg(pDb));
         sqlite3_finalize(pSt);
         sqlite3_close(pDb);
         return NSS_STATUS_UNAVAIL;
@@ -89,6 +89,7 @@ enum nss_status _nss_sqlite_getpwnam_r(const char* name, struct passwd *pwbuf,
 
     res = fetch_first(pDb, pSt);
     if(res != NSS_STATUS_SUCCESS) {
+        NSS_DEBUG("fetch_first() failed - returing [%d]\n", res);
         return res;
     }
 
@@ -102,7 +103,7 @@ enum nss_status _nss_sqlite_getpwnam_r(const char* name, struct passwd *pwbuf,
     sqlite3_finalize(pSt);
     sqlite3_close(pDb);
 
-    NSS_DEBUG("Look successfull !\n");
+    NSS_DEBUG("Lookup successfull! - returing [%d]\n", res);
     return res;
 }
 
@@ -121,14 +122,14 @@ enum nss_status _nss_sqlite_getpwuid_r(uid_t uid, struct passwd *pwbuf,
     const unsigned char *homedir;
     const char *sql = "SELECT username, gid, shell, homedir FROM passwd WHERE uid = ?";
 
-    NSS_DEBUG("getpwuid_r: looking for user #%d\n", uid);
+    NSS_DEBUG("getpwuid_r: looking for user %d\n", uid);
 
     if(!open_and_prepare(&pDb, &pSt, sql)) {
         return NSS_STATUS_UNAVAIL;
     }
 
     if(sqlite3_bind_int(pSt, 1, uid) != SQLITE_OK) {
-        NSS_DEBUG(sqlite3_errmsg(pDb));
+        NSS_ERROR("SQL Error Message : %s\n", sqlite3_errmsg(pDb));
         sqlite3_finalize(pSt);
         sqlite3_close(pDb);
         return NSS_STATUS_UNAVAIL;
