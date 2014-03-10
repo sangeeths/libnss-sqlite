@@ -22,6 +22,7 @@
 
 #include "nss-sqlite.h"
 #include "utils.h"
+#include "conf.h"
 
 #include <errno.h>
 #include <grp.h>
@@ -30,80 +31,94 @@
 #include <string.h>
 #include <unistd.h>
 
+
 /**
  * Setup everything needed to retrieve passwd entries.
  */
-enum nss_status _nss_sqlite_setpwent(void) {
+enum nss_status _nss_sqlite_setpwent(void)
+{
     NSS_DEBUG("Initializing pw functions\n");
     return NSS_STATUS_SUCCESS;
 }
 
+
 /*
  * Free getpwent resources.
  */
-enum nss_status _nss_sqlite_endpwent(void) {
+enum nss_status _nss_sqlite_endpwent(void)
+{
     NSS_DEBUG("Finishing pw functions\n");
     return NSS_STATUS_SUCCESS;
 }
+
 
 /*
  * Return next passwd entry.
  * Not implemeted yet.
  */
-
-enum nss_status
-_nss_sqlite_getpwent_r(struct passwd *pwbuf, char *buf,
-                      size_t buflen, int *errnop) {
+enum nss_status _nss_sqlite_getpwent_r(struct passwd *pwbuf, char *buf,
+                                       size_t buflen, int *errnop)
+{
     NSS_DEBUG("Getting next pw entry\n");
     return NSS_STATUS_UNAVAIL;
 }
+
 
 /**
  * Get user info by username.
  * Open database connection, fetch the user by name, close the connection.
  */
-
 enum nss_status _nss_sqlite_getpwnam_r(const char* name, struct passwd *pwbuf,
-               char *buf, size_t buflen, int *errnop) {
+                                       char *buf, size_t buflen, int *errnop)
+{
     sqlite3 *pDb;
     struct sqlite3_stmt* pSt;
     int res;
     uid_t uid;
     gid_t gid;
-    const char* sql = "SELECT uid, gid, shell, homedir FROM passwd WHERE username = ?";
     const char* shell;
     const char* homedir;
+    char query[MAXBUF];
+    CFG *cfg = NULL;
 
-    NSS_DEBUG("getpwnam_r: Looking for user %s\n", name);
+    NSS_DEBUG("NSS performing (passwd) lookup for for username [%s]\n", name);
 
-    if(!open_and_prepare(&pDb, &pSt, sql)) {
+    /* get config parameters from the .conf file */
+    get_config(&cfg);
+
+    /*
+     * compose the query to fetch uid, gid, shell and homedir
+     * for the incoming user
+     */
+    sprintf(query, "SELECT u.%s, urm.%s, u.%s, u.%s FROM %s u " \
+            "INNER JOIN %s urm on u.%s == urm.%s AND u.%s = '%s';",
+            cfg->user_table_uid_column, cfg->user_group_map_groupid_column,
+            cfg->user_table_shell_column, cfg->user_table_homedir_column,
+            cfg->user_table, cfg->user_group_map_table,
+            cfg->user_table_uid_column, cfg->user_group_map_userid_column,
+            cfg->user_table_userid_column, name);
+
+    if(!open_and_prepare(&pDb, &pSt, query, cfg->database))
         return NSS_STATUS_UNAVAIL;
-    }
-
-    if(sqlite3_bind_text(pSt, 1, name, -1, SQLITE_STATIC) != SQLITE_OK) {
-        NSS_ERROR("SQL Error Message : %s\n", sqlite3_errmsg(pDb));
-        sqlite3_finalize(pSt);
-        sqlite3_close(pDb);
-        return NSS_STATUS_UNAVAIL;
-    }
 
     res = fetch_first(pDb, pSt);
-    if(res != NSS_STATUS_SUCCESS) {
-        NSS_DEBUG("fetch_first() failed - returing [%d]\n", res);
+    if(res != NSS_STATUS_SUCCESS)
         return res;
-    }
 
     /* SQLITE_ROW was returned, fetch data */
     uid = sqlite3_column_int(pSt, 0);
     gid = sqlite3_column_int(pSt, 1);
     shell = sqlite3_column_text(pSt, 2);
     homedir = sqlite3_column_text(pSt, 3);
-    res = fill_passwd(pwbuf, buf, buflen, name, "x", uid, gid, "", shell, homedir, errnop);
+
+    /* fill the passwd struct */
+    res = fill_passwd(pwbuf, buf, buflen, name, "x", uid,
+                      gid, "", shell, homedir, errnop);
 
     sqlite3_finalize(pSt);
     sqlite3_close(pDb);
 
-    NSS_DEBUG("Lookup successfull! - returing [%d]\n", res);
+    NSS_DEBUG("NSS (passwd) lookup for username [%s] successful!\n", name);
     return res;
 }
 
@@ -120,41 +135,32 @@ enum nss_status _nss_sqlite_getpwuid_r(uid_t uid, struct passwd *pwbuf,
     const unsigned char *name;
     const unsigned char *shell;
     const unsigned char *homedir;
-    const char *sql = "SELECT username, gid, shell, homedir FROM passwd WHERE uid = ?";
+    char query[MAXBUF];
+    CFG *cfg = NULL;
 
-    NSS_DEBUG("getpwuid_r: looking for user %d\n", uid);
+    NSS_DEBUG("NSS performing (passwd) lookup for user id [%d]\n", uid);
 
-    if(!open_and_prepare(&pDb, &pSt, sql)) {
+    /* get config parameters from the .conf file */
+    get_config(&cfg);
+
+    /*
+     * compose the query to fetch userid, name, shell and homedir
+     * for the incoming user id
+     */
+    sprintf(query, "SELECT u.%s, urm.%s, u.%s, u.%s FROM %s u " \
+            "INNER JOIN %s urm on u.%s == urm.%s AND u.%s = %d;",
+            cfg->user_table_userid_column, cfg->user_group_map_groupid_column,
+            cfg->user_table_shell_column, cfg->user_table_homedir_column,
+            cfg->user_table, cfg->user_group_map_table,
+            cfg->user_table_uid_column, cfg->user_group_map_userid_column,
+            cfg->user_table_uid_column, uid);
+
+    if(!open_and_prepare(&pDb, &pSt, query, cfg->database))
         return NSS_STATUS_UNAVAIL;
-    }
 
-    if(sqlite3_bind_int(pSt, 1, uid) != SQLITE_OK) {
-        NSS_ERROR("SQL Error Message : %s\n", sqlite3_errmsg(pDb));
-        sqlite3_finalize(pSt);
-        sqlite3_close(pDb);
-        return NSS_STATUS_UNAVAIL;
-    }
-
-    res = sqlite3_step(pSt);
-
-    switch(res) {
-        /* Something was wrong with locks, try again later. */
-        case SQLITE_BUSY:
-            sqlite3_finalize(pSt);
-            sqlite3_close(pDb);
-        return NSS_STATUS_TRYAGAIN;
-        /* No row returned (?) */
-        case SQLITE_DONE:
-            sqlite3_finalize(pSt);
-            sqlite3_close(pDb);
-        return NSS_STATUS_NOTFOUND;
-        case SQLITE_ROW:
-        break;
-        default:
-            sqlite3_finalize(pSt);
-            sqlite3_close(pDb);
-        return NSS_STATUS_UNAVAIL;
-    }
+    res = fetch_first(pDb, pSt);
+    if(res != NSS_STATUS_SUCCESS)
+        return res;
 
     name = sqlite3_column_text(pSt, 0);
     gid = sqlite3_column_int(pSt, 1);
@@ -163,10 +169,11 @@ enum nss_status _nss_sqlite_getpwuid_r(uid_t uid, struct passwd *pwbuf,
 
     fill_passwd(pwbuf, buf, buflen, name, "*", uid, gid, "",
             shell, homedir, errnop);
-   
+
     sqlite3_finalize(pSt);
     sqlite3_close(pDb);
 
+    NSS_DEBUG("NSS (passwd) lookup for user id [%d] successful!\n", uid);
     return NSS_STATUS_SUCCESS;
 }
 

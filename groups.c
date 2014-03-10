@@ -21,6 +21,7 @@
  */
 #include "nss-sqlite.h"
 #include "utils.h"
+#include "conf.h"
 
 #include <errno.h>
 #include <grp.h>
@@ -60,30 +61,47 @@ static void free_2Dtable(char** t, int c) {
     free(t);
 }
 
+
 /*
  * Initialize grent functions (serial group access).
  */
-enum nss_status _nss_sqlite_setgrent(void) {
-    const char* sql = "SELECT gid, groupname, passwd FROM groups";
+enum nss_status _nss_sqlite_setgrent(void)
+{
+    char query[MAXBUF];
+    CFG *cfg = NULL;
+    int ret = NSS_STATUS_SUCCESS;
+
+    get_config(&cfg);
+
+    sprintf(query, "SELECT %s, %s FROM %s", cfg->group_table_gid_column,
+            cfg->group_table_groupid_colum, cfg->group_table);
+
     pthread_mutex_lock(&grent_mutex);
-    if(grent_data.pDb == NULL) {
-        NSS_DEBUG("setgrent: opening DB connection\n");
-        if(!open_and_prepare(&grent_data.pDb, &grent_data.pSt, sql)) {
-            NSS_ERROR("setgrent: unable to open connection\n");
-            return NSS_STATUS_UNAVAIL;
-        } else {
-            NSS_DEBUG("setgrent: DB connection opened");
-        }
+    if (grent_data.pDb)
+        goto out;
+
+    NSS_DEBUG("Attempting to open a DB connection!\n");
+    if(!open_and_prepare(&grent_data.pDb, &grent_data.pSt,
+                         query, cfg->database)) {
+        NSS_ERROR("Unable to open connection\n");
+        ret = NSS_STATUS_UNAVAIL;
+        goto out;
+    } else {
+        NSS_DEBUG("DB connection successfully opened!");
     }
+
+out:
     pthread_mutex_unlock(&grent_mutex);
-    return NSS_STATUS_SUCCESS;
+    return ret;
 }
+
 
 /*
  * Finalize grent functions.
  */
-enum nss_status _nss_sqlite_endgrent(void) {
-    NSS_DEBUG("endgrent: finalizing group serial access facilities\n");
+enum nss_status _nss_sqlite_endgrent(void)
+{
+    NSS_DEBUG("Finalizing group serial access facilities\n");
     pthread_mutex_lock(&grent_mutex);
     if(grent_data.pDb != NULL) {
         sqlite3_finalize(grent_data.pSt);
@@ -94,6 +112,7 @@ enum nss_status _nss_sqlite_endgrent(void) {
     return NSS_STATUS_SUCCESS;
 }
 
+
 /*
  * Return next group. see man getgrent_r
  * @param gbuf Buffer to store group data.
@@ -103,19 +122,17 @@ enum nss_status _nss_sqlite_endgrent(void) {
  * @param errnop Pointer to errno, will be filled if
  * an error occurs.
  */
-enum nss_status
-_nss_sqlite_getgrent_r(struct group *gbuf, char *buf,
-                      size_t buflen, int *errnop) {
+enum nss_status _nss_sqlite_getgrent_r(struct group *gbuf, char *buf,
+                                       size_t buflen, int *errnop)
+{
     int res;
     const unsigned char* name;
     const unsigned char* pw;
     gid_t gid;
-    NSS_DEBUG("getgrent_r\n");
     pthread_mutex_lock(&grent_mutex);
 
-    if(grent_data.pDb == NULL) {
+    if(grent_data.pDb == NULL)
         _nss_sqlite_setgrent();
-    }
 
     if(grent_data.try_again) {
         res = fill_group(grent_data.pDb, gbuf, buf, buflen, name, pw, gid, errnop);
@@ -136,7 +153,7 @@ _nss_sqlite_getgrent_r(struct group *gbuf, char *buf,
     gid = sqlite3_column_int(grent_data.pSt, 0);
     name = sqlite3_column_text(grent_data.pSt, 1);
     pw = sqlite3_column_text(grent_data.pSt, 2);
-    NSS_DEBUG("getgrent_r: fetched group %d: %s\n", gid, name);
+    NSS_DEBUG("fetched group [gid=%d] [name=%s]\n", gid, name);
 
     res = fill_group(grent_data.pDb, gbuf, buf, buflen, name, pw, gid, errnop);
     if(res == NSS_STATUS_TRYAGAIN && (*errnop) == ERANGE) {
@@ -152,6 +169,7 @@ _nss_sqlite_getgrent_r(struct group *gbuf, char *buf,
     return NSS_STATUS_SUCCESS;
 }
 
+
 /**
  * Get group by name.
  * @param name Groupname.
@@ -161,43 +179,41 @@ _nss_sqlite_getgrent_r(struct group *gbuf, char *buf,
  * @param errnop Pointer to errno, will be filled if
  * an error occurs.
  */
-
-enum nss_status
-_nss_sqlite_getgrnam_r(const char* name, struct group *gbuf,
-                      char *buf, size_t buflen, int *errnop) {
+enum nss_status _nss_sqlite_getgrnam_r(const char* name, struct group *gbuf,
+                                       char *buf, size_t buflen, int *errnop)
+{
     sqlite3 *pDb;
     struct sqlite3_stmt* pSt;
-    const unsigned char* pw;
-    gid_t gid;
     int res;
-    const char* sql = "SELECT gid, passwd FROM groups WHERE groupname = ?";
+    gid_t gid;
+    const unsigned char* pw = "x";
+    char query[MAXBUF];
+    CFG *cfg = NULL;
 
-    NSS_DEBUG("getgrnam_r : looking for group %s\n", name);
+    NSS_DEBUG("NSS performing (group) lookup for group name [%s]\n", name);
 
-    if(!open_and_prepare(&pDb, &pSt, sql)) {
+    get_config(&cfg);
+
+    sprintf(query, "SELECT %s FROM %s WHERE %s = '%s'",
+            cfg->group_table_gid_column, cfg->group_table,
+            cfg->group_table_groupid_colum, name);
+
+    if(!open_and_prepare(&pDb, &pSt, query, cfg->database))
         return NSS_STATUS_UNAVAIL;
-    }
-
-    if(sqlite3_bind_text(pSt, 1, name, -1, SQLITE_STATIC) != SQLITE_OK) {
-        NSS_ERROR("SQL Error Message : %s\n", sqlite3_errmsg(pDb));
-        sqlite3_finalize(pSt);
-        sqlite3_close(pDb);
-        return NSS_STATUS_UNAVAIL;
-    }
 
     res = fetch_first(pDb, pSt);
-    if(res != NSS_STATUS_SUCCESS) {
+    if(res != NSS_STATUS_SUCCESS)
         return res;
-    }
 
     gid = sqlite3_column_int(pSt, 0);
-    pw = sqlite3_column_text(pSt, 1);
-    res = fill_group(pDb, gbuf, buf, buflen, (unsigned char*)name, pw, gid, errnop);
+    res = fill_group(pDb, gbuf, buf, buflen, (unsigned char*)name,
+                     pw, gid, errnop);
 
     sqlite3_finalize(pSt);
     sqlite3_close(pDb);
     return res;
 }
+
 
 /*
  * Get group by GID.
@@ -208,44 +224,40 @@ _nss_sqlite_getgrnam_r(const char* name, struct group *gbuf,
  * @param errnop Pointer to errno, will be filled if
  * an error occurs.
  */
+enum nss_status _nss_sqlite_getgrgid_r(gid_t gid, struct group *gbuf,
+                                       char *buf, size_t buflen, int *errnop)
+{
+    sqlite3 *pDb;
+    struct sqlite3_stmt* pSt;
+    int res;
+    const unsigned char* name;
+    const unsigned char* pw = "x";
+    char query[MAXBUF];
+    CFG *cfg = NULL;
 
-enum nss_status
-_nss_sqlite_getgrgid_r(gid_t gid, struct group *gbuf,
-                      char *buf, size_t buflen, int *errnop) {
-     sqlite3 *pDb;
-     const unsigned char* name;
-     const unsigned char* pw;
-     struct sqlite3_stmt* pSt;
-     int res;
-     const char* sql = "SELECT groupname, passwd FROM groups WHERE gid = ?";
+    NSS_DEBUG("NSS performing lookup for group id [%d]\n", gid);
 
+    get_config(&cfg);
 
-    NSS_DEBUG("getgrgid_r : looking for group %d\n", gid);
+    sprintf(query, "SELECT %s FROM %s WHERE %s = '%d'",
+            cfg->group_table_groupid_colum, cfg->group_table,
+            cfg->group_table_gid_column, gid);
 
-    if(!open_and_prepare(&pDb, &pSt, sql)) {
+    if(!open_and_prepare(&pDb, &pSt, query, cfg->database))
         return NSS_STATUS_UNAVAIL;
-    }
-
-    if(sqlite3_bind_int(pSt, 1, gid) != SQLITE_OK) {
-        NSS_ERROR("SQL Error Message : %s\n", sqlite4_errmsg(pDb));
-        sqlite3_finalize(pSt);
-        sqlite3_close(pDb);
-        return NSS_STATUS_UNAVAIL;
-    }
 
     res = fetch_first(pDb, pSt);
-    if(res != NSS_STATUS_SUCCESS) {
+    if(res != NSS_STATUS_SUCCESS)
         return res;
-    }
+
     name = sqlite3_column_text(pSt, 0);
-    pw = sqlite3_column_text(pSt, 1);
     res = fill_group(pDb, gbuf, buf, buflen, name, pw, gid, errnop);
 
     sqlite3_finalize(pSt);
     sqlite3_close(pDb);
     return res;
-
 }
+
 
 /*
  * Haven't seen any detailled documentation about this function.
@@ -262,43 +274,39 @@ _nss_sqlite_getgrgid_r(gid_t gid, struct group *gbuf,
  * @param limit Max size of groupsp (<= 0 if no limit).
  * @param errnop Pointer to errno (filled if an error occurs).
  */
-
-enum nss_status
-_nss_sqlite_initgroups_dyn(const char *user, gid_t gid, long int *start,
-                          long int *size, gid_t **groupsp, long int limit,
-                                                    int *errnop) {
+enum nss_status _nss_sqlite_initgroups_dyn(const char *user, gid_t gid,
+                                           long int *start, long int *size,
+                                           gid_t **groupsp, long int limit,
+                                           int *errnop)
+{
     sqlite3 *pDb;
     struct sqlite3_stmt *pSt;
-    const char* sql = "SELECT ug.gid FROM user_group ug INNER JOIN passwd p ON p.uid = ug.uid WHERE p.username = ? AND ug.gid != ?";
     int res;
-    NSS_DEBUG("initgroups_dyn: filling groups for user : %s, main gid : %d\n", user, gid);
+    char query[MAXBUF];
+    CFG *cfg = NULL;
 
-    if(!open_and_prepare(&pDb, &pSt, sql)) {
-        return NSS_STATUS_UNAVAIL;
-    }
+    NSS_DEBUG("Filling groups for user [%s] - gid [%d]\n", user, gid);
 
-    if(sqlite3_bind_text(pSt, 1, user, -1, SQLITE_STATIC) != SQLITE_OK) {
-        NSS_ERROR("Unable to bind username in initgroups_dyn\n");
-        sqlite3_finalize(pSt);
-        sqlite3_close(pDb);
-        return NSS_STATUS_UNAVAIL;
-    }
+    get_config(&cfg);
 
-    if(sqlite3_bind_int(pSt, 2, gid) != SQLITE_OK) {
-        NSS_ERROR("Unable to bind gid in initgroups_dyn\n");
-        sqlite3_finalize(pSt);
-        sqlite3_close(pDb);
+    sprintf(query, "SELECT urm.%s FROM %s urm INNER JOIN %s u ON " \
+            "u.%s == urm.%s WHERE u.%s = '%s' AND urm.%s != %d;",
+            cfg->user_group_map_groupid_column, cfg->user_group_map_table,
+            cfg->user_table, cfg->user_table_uid_column,
+            cfg->user_group_map_userid_column,
+            cfg->user_table_userid_column, user,
+            cfg->user_group_map_groupid_column, gid);
+
+    if(!open_and_prepare(&pDb, &pSt, query, cfg->database))
         return NSS_STATUS_UNAVAIL;
-    }
 
     res = fetch_first(pDb, pSt);
-    if(res != NSS_STATUS_SUCCESS) {
+    if(res != NSS_STATUS_SUCCESS)
         return res;
-    }
 
     do {
         int gid = sqlite3_column_int(pSt, 0);
-        NSS_DEBUG("initgroups_dyn: adding group %d\n", gid);
+        NSS_DEBUG("Adding group id [%d] for user [%s]\n", gid, user);
         /* Too short, doubling size */
         if(*start == *size) {
             if(limit > 0) {
@@ -306,7 +314,7 @@ _nss_sqlite_initgroups_dyn(const char *user, gid_t gid, long int *start,
                     *size = (limit < (*size * 2)) ? limit : (*size * 2);
                 } else {
                     /* limit reached, tell caller to try with a bigger one */
-                    NSS_ERROR("initgroups_dyn: limit was too low\n");
+                    NSS_ERROR("Limit was too low\n");
                     *errnop = ERANGE;
                     sqlite3_finalize(pSt);
                     sqlite3_close(pDb);
@@ -330,6 +338,7 @@ _nss_sqlite_initgroups_dyn(const char *user, gid_t gid, long int *start,
     return NSS_STATUS_SUCCESS;
 }
 
+
 /*
  * Fills all users for a given group.
  * @param buffer Buffer which will contain all users' names headed
@@ -340,35 +349,39 @@ _nss_sqlite_initgroups_dyn(const char *user, gid_t gid, long int *start,
  * @param buflen Buffer length.
  * @param errnop Pointer to errno, will be filled if an error occurs.
  */
-
-enum nss_status get_users(sqlite3* pDb, gid_t gid, char* buffer, size_t buflen, int* errnop) {
+enum nss_status get_users(sqlite3* pDb, gid_t gid, char* buffer,
+                          size_t buflen, int* errnop)
+{
     struct sqlite3_stmt *pSt;
     int res, msize = 20, mcount = 0, i, ptr_area_size;
-    const char* sql = "SELECT username FROM passwd u INNER JOIN user_group ug ON ug.uid = u.uid WHERE ug.gid = ?";
     char* next_member;
     char **members;
     char **ptr_area = (char**)buffer;
 
-    NSS_DEBUG("get_users: looking for members of group %d\n", gid);
-    
-    if(sqlite3_prepare(pDb, sql, strlen(sql), &pSt, NULL) != SQLITE_OK) {
-        NSS_ERROR("SQL Error Message : %s\n", sqlite3_errmsg(pDb));
-        sqlite3_finalize(pSt);
-        return NSS_STATUS_UNAVAIL;
-    }
+    char query[MAXBUF];
+    CFG *cfg = NULL;
 
-    if(sqlite3_bind_int(pSt, 1, gid) != SQLITE_OK) {
-        NSS_ERROR("SQL Error Message : %s\n", sqlite3_errmsg(pDb));
-        sqlite3_finalize(pSt);
+    NSS_DEBUG("NSS performing (group) lookup for members " \
+              "of group id [%d]\n", gid);
+
+    get_config(&cfg);
+
+    sprintf(query, "SELECT u.%s FROM %s u INNER JOIN %s urm ON " \
+            "urm.%s = u.%s and urm.%s = %d;",
+            cfg->user_table_userid_column, cfg->user_table,
+            cfg->user_group_map_table, cfg->user_group_map_userid_column,
+            cfg->user_table_uid_column, cfg->user_group_map_groupid_column,
+            gid);
+
+    if(!open_and_prepare(&pDb, &pSt, query, cfg->database))
         return NSS_STATUS_UNAVAIL;
-    }
 
     res = sqlite3_step(pSt);
 
     if(res != SQLITE_ROW) {
         sqlite3_finalize(pSt);
         if(res == SQLITE_DONE) {
-            NSS_DEBUG("get_users: No member found\n");
+            NSS_DEBUG("No member found\n");
             if(buflen < sizeof(char*)) {
                 *errnop = ERANGE;
                 return NSS_STATUS_TRYAGAIN;

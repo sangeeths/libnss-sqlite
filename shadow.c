@@ -17,11 +17,12 @@
  */
 
 /*
- * passwd.c : Functions handling passwd entries retrieval.
+ * shadow.c : Functions handling passwd entries retrieval.
  */
 
 #include "nss-sqlite.h"
 #include "utils.h"
+#include "conf.h"
 
 #include <errno.h>
 #include <grp.h>
@@ -32,39 +33,39 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+
 /*
  * Get shadow information using username.
  */
-
 enum nss_status _nss_sqlite_getspnam_r(const char* name, struct spwd *spbuf,
-               char *buf, size_t buflen, int *errnop) {
+                                       char *buf, size_t buflen, int *errnop)
+{
     sqlite3 *pDb;
     int name_length;
     int pw_length;
     const unsigned char* pw;
     struct sqlite3_stmt* pSt;
     int res;
-    const char* sql = "SELECT passwd FROM shadow WHERE username = ?";
+    char query[MAXBUF];
+    CFG *cfg = NULL;
 
-    NSS_DEBUG("getspnam_r: looking for user %s (shadow)\n", name);
+    NSS_DEBUG("NSS performing (shadow) lookup for username [%s]\n", name);
 
+    /* get config parameters from the .conf file */
+    get_config(&cfg);
 
-    if(!open_and_prepare_sp(&pDb, &pSt, sql)) {
+    /* compose the query */
+    sprintf(query, "SELECT %s FROM %s WHERE %s = '%s';",
+            cfg->user_table_passwd_column, cfg->user_table,
+            cfg->user_table_userid_column, name);
+
+    if(!open_and_prepare(&pDb, &pSt, query, cfg->database))
         return NSS_STATUS_UNAVAIL;
-    }
-
-    if(sqlite3_bind_text(pSt, 1, name, -1, SQLITE_STATIC) != SQLITE_OK) {
-        //NSS_DEBUG(sqlite3_errmsg(pDb));
-        sqlite3_finalize(pSt);
-        sqlite3_close(pDb);
-        return NSS_STATUS_UNAVAIL;
-    }
 
     res = fetch_first(pDb, pSt);
-    if(res != NSS_STATUS_SUCCESS) {
+    if(res != NSS_STATUS_SUCCESS)
         return res;
-    }
-    
+
     /* SQLITE_ROW was returned, fetch data */
     pw = sqlite3_column_text(pSt, 0);
     name_length = strlen(name) + 1;
@@ -87,7 +88,7 @@ enum nss_status _nss_sqlite_getspnam_r(const char* name, struct spwd *spbuf,
     sqlite3_finalize(pSt);
     sqlite3_close(pDb);
 
+    NSS_DEBUG("NSS (shadow) lookup for username [%s] successful\n", name);
     return NSS_STATUS_SUCCESS;
 }
-
 

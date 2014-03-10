@@ -31,3 +31,5 @@ stamp-h1
 utils.lo
 utils.o
 .*.sw*
+*.o
+*.lo

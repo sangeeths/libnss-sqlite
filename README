@@ -14,23 +14,31 @@ machine.
 NOTE: Just in case you do not have correct locale settings, please export the
 following to your bash before running any build commands.
 
+```
     export LC_CTYPE=en_US.UTF-8
     export LC_ALL=en_US.UTF-8
+```
 
 To install the necessary libs and tools, run the following command:
 
+```
     apt-get install sqlite3 libsqlite3-dev automake autoconf make libtool
+```
 
 Build commands:
 
+```
     ./bootstrap.sh
     ./configure --with-passwd-db=/var/db/passwd.sqlite --with-shadow-db=/var/db/shadow.sqlite --enable-debug
     make
     sudo make install
+```
 
 For developers for frequent use:
 
+```
     make distclean ; ./bootstrap.sh ; ./configure --with-passwd-db=/var/db/passwd.sqlite --with-shadow-db=/var/db/shadow.sqlite --enable-debug ; make ; sudo make install
+```
 
 
  1. Create database
